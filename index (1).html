@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#19192d">
+<title>Amigo Oculto - Roleta</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;padding:20px;display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;background:linear-gradient(135deg,#101020,#29204d);color:white}
+.container{width:100%;max-width:480px;padding:24px;text-align:center;background:#19192d;border:1px solid #45456d;border-radius:22px;box-shadow:0 12px 40px #0007}
+h1{color:#b8a5ff}p{color:#c9c9df;line-height:1.5}
+input{width:100%;padding:14px;margin:7px 0;border:1px solid #505075;border-radius:10px;background:#101020;color:white;font-size:16px}
+button{width:100%;padding:14px;margin-top:12px;border:none;border-radius:10px;background:#8065ff;color:white;font-size:16px;font-weight:bold;cursor:pointer}
+button:hover{background:#987fff}button:disabled{opacity:.5;cursor:not-allowed}
+.hidden{display:none!important}.counter{padding:12px;margin:16px 0;background:#292943;border-radius:10px}
+.wheel-container{position:relative;width:min(100%,340px);margin:25px auto}
+canvas{width:100%;height:auto;display:block;transition:transform 4s cubic-bezier(.12,.75,.12,1)}
+.pointer{position:absolute;top:-8px;left:50%;transform:translateX(-50%);z-index:2;width:0;height:0;border-left:17px solid transparent;border-right:17px solid transparent;border-top:32px solid white}
+.result{padding:18px;margin-top:18px;border:1px solid #7964d8;border-radius:12px;background:#292943;color:#ffe27a;font-size:21px;font-weight:bold;overflow-wrap:anywhere}
+.small{font-size:12px;color:#9999b7}
+</style>
+</head>
+<body>
+<div class="container">
+  <section id="home">
+    <h1>🎁 Amigo Oculto</h1>
+    <p>Crie sua conta uma única vez. Neste aparelho e navegador, você continuará conectado automaticamente nas próximas visitas.</p>
+    <div class="counter">Participantes: <strong><span id="count">0</span>/5</strong></div>
+    <button id="createButton" onclick="showRegister()">Criar minha conta</button>
+    <p class="small">Os dados ficam salvos neste navegador. Não limpe os dados do site nem use navegação anônima.</p>
+  </section>
+
+  <section id="register" class="hidden">
+    <h1>📝 Criar conta</h1>
+    <form id="registerForm">
+      <input id="username" placeholder="Seu nome de usuário" maxlength="25" autocomplete="username" required>
+      <input id="character" placeholder="Nome do seu personagem" maxlength="25" autocomplete="off" required>
+      <input id="password" type="password" placeholder="Crie uma senha (opcional para este protótipo)" minlength="4" maxlength="50" autocomplete="new-password" required>
+      <button type="submit">Criar conta e entrar</button>
+    </form>
+    <button onclick="showHome()">Voltar</button>
+  </section>
+
+  <section id="game" class="hidden">
+    <h1>🎡 Roleta do Amigo Oculto</h1>
+    <p id="welcome"></p>
+    <div class="counter">Participantes cadastrados: <strong><span id="gameCount">0</span>/5</strong></div>
+    <p id="instructions"></p>
+    <div class="wheel-container"><div class="pointer"></div><canvas id="wheel" width="600" height="600"></canvas></div>
+    <button id="drawButton" onclick="drawSecretSanta()">SORTEAR AMIGO OCULTO</button>
+    <div id="result" class="result hidden"></div>
+    <button id="revealButton" class="hidden" onclick="revealMyResult()">Revelar meu amigo oculto</button>
+    <button onclick="logout()">Trocar de participante</button>
+  </section>
+</div>
+<script>
+"use strict";
+const MAX_USERS=5;
+const STORAGE_KEY="amigo_oculto_roleta_v2";
+const LEGACY_KEY="amigo_oculto_roleta_v1";
+const SESSION_KEY="amigo_oculto_current_user_v2";
+const colors=["#7657ff","#e64e86","#258fce","#e5a52e","#28a77a"];
+let data=loadData();
+let currentUserId=localStorage.getItem(SESSION_KEY);
+let spinning=false;
+
+function loadData(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||"null");
+    if(saved&&Array.isArray(saved.users))return {users:saved.users,assignments:saved.assignments||null};
+    // Importa os dados da versão anterior, se existirem, para não os perder.
+    const old=JSON.parse(localStorage.getItem(LEGACY_KEY)||"null");
+    if(old&&Array.isArray(old.users)){
+      const migrated={users:old.users,assignments:old.assignments||null};
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(migrated));
+      return migrated;
+    }
+  }catch(e){console.warn("Não foi possível ler os dados salvos.",e);}
+  return {users:[],assignments:null};
+}
+function saveData(){localStorage.setItem(STORAGE_KEY,JSON.stringify(data));}
+function showSection(id){document.querySelectorAll(".container section").forEach(s=>s.classList.add("hidden"));document.getElementById(id).classList.remove("hidden");}
+function currentUser(){return data.users.find(u=>u.id===currentUserId)||null;}
+function updateCount(){
+  document.getElementById("count").textContent=data.users.length;
+  document.getElementById("createButton").disabled=data.users.length>=MAX_USERS;
+  document.getElementById("createButton").textContent=data.users.length>=MAX_USERS?"Limite de cinco contas atingido":"Criar minha conta";
+}
+function showHome(){updateCount();showSection("home");}
+function showRegister(){
+  if(data.users.length>=MAX_USERS){alert("O limite de cinco participantes foi atingido.");return;}
+  showSection("register");
+}
+document.getElementById("registerForm").addEventListener("submit",function(event){
+  event.preventDefault();
+  data=loadData();
+  if(data.users.length>=MAX_USERS){alert("Não há mais vagas.");showHome();return;}
+  const username=document.getElementById("username").value.trim();
+  const character=document.getElementById("character").value.trim();
+  const password=document.getElementById("password").value;
+  if(!username||!character||password.length<4){alert("Confira os campos preenchidos.");return;}
+  if(data.users.some(u=>u.username.toLowerCase()===username.toLowerCase())){alert("Este nome de usuário já existe.");return;}
+  if(data.users.some(u=>u.character.toLowerCase()===character.toLowerCase())){alert("Este personagem já foi escolhido.");return;}
+  const user={id:(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random()),username,character,password};
+  data.users.push(user);
+  saveData();
+  setCurrentUser(user.id);
+  document.getElementById("registerForm").reset();
+  openGame();
+});
+function setCurrentUser(id){currentUserId=id;localStorage.setItem(SESSION_KEY,id);}
+function openGame(){
+  const user=currentUser();
+  if(!user){currentUserId=null;localStorage.removeItem(SESSION_KEY);showHome();return;}
+  showSection("game");
+  document.getElementById("welcome").textContent="Bem-vindo, "+user.username+"!";
+  document.getElementById("gameCount").textContent=data.users.length;
+  document.getElementById("result").classList.add("hidden");
+  const drawButton=document.getElementById("drawButton");
+  const revealButton=document.getElementById("revealButton");
+  if(data.assignments){
+    drawButton.classList.add("hidden");
+    revealButton.classList.remove("hidden");
+    document.getElementById("instructions").textContent="O sorteio já foi realizado. Revele somente o seu resultado.";
+    drawWheel([]);
+  }else{
+    drawButton.classList.remove("hidden");
+    revealButton.classList.add("hidden");
+    document.getElementById("instructions").textContent=data.users.length<MAX_USERS?"Aguardando todos os cinco participantes.":"Todos estão cadastrados. O sorteio está pronto.";
+    drawButton.disabled=data.users.length!==MAX_USERS;
+    drawWheel(data.users);
+  }
+}
+function drawWheel(users){
+  const canvas=document.getElementById("wheel"),ctx=canvas.getContext("2d");
+  const center=canvas.width/2,radius=center-8;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(!users.length){
+    ctx.beginPath();ctx.arc(center,center,radius,0,Math.PI*2);ctx.fillStyle="#33334d";ctx.fill();
+    ctx.fillStyle="white";ctx.font="bold 26px Arial";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText(data.assignments?"Sorteio realizado":"Aguardando",center,center);return;
+  }
+  const slice=Math.PI*2/users.length;
+  users.forEach((user,i)=>{
+    const start=-Math.PI/2+i*slice,end=start+slice;
+    ctx.beginPath();ctx.moveTo(center,center);ctx.arc(center,center,radius,start,end);ctx.closePath();ctx.fillStyle=colors[i%colors.length];ctx.fill();ctx.strokeStyle="white";ctx.lineWidth=3;ctx.stroke();
+    ctx.save();ctx.translate(center,center);ctx.rotate(start+slice/2);ctx.fillStyle="white";ctx.font="bold 23px Arial";ctx.textAlign="right";ctx.textBaseline="middle";
+    let name=user.character;while(ctx.measureText(name).width>radius*.65&&name.length>4)name=name.slice(0,-2)+"…";
+    ctx.fillText(name,radius-22,0);ctx.restore();
+  });
+  ctx.beginPath();ctx.arc(center,center,42,0,Math.PI*2);ctx.fillStyle="#19192d";ctx.fill();ctx.strokeStyle="white";ctx.lineWidth=4;ctx.stroke();
+  ctx.fillStyle="white";ctx.font="bold 17px Arial";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("GIRAR",center,center);
+}
+function createAssignments(){
+  const users=data.users;if(users.length!==MAX_USERS)return null;
+  const recipients=[...users];
+  for(let i=recipients.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[recipients[i],recipients[j]]=[recipients[j],recipients[i]];}
+  // Repetir embaralhamentos até não haver ninguém tirando a si mesmo.
+  for(let attempt=0;attempt<10000;attempt++){
+    for(let i=recipients.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[recipients[i],recipients[j]]=[recipients[j],recipients[i]];}
+    if(users.every((u,i)=>u.id!==recipients[i].id)){
+      const assignments={};users.forEach((u,i)=>assignments[u.id]=recipients[i].id);return assignments;
+    }
+  }
+  return null;
+}
+function drawSecretSanta(){
+  if(spinning||data.assignments)return;
+  data=loadData();
+  if(data.users.length!==MAX_USERS){alert("Aguardem os cinco participantes.");openGame();return;}
+  const assignments=createAssignments();
+  if(!assignments){alert("Não foi possível realizar o sorteio. Tente novamente.");return;}
+  spinning=true;
+  const canvas=document.getElementById("wheel"),button=document.getElementById("drawButton");
+  button.disabled=true;
+  canvas.style.transition="none";canvas.style.transform="rotate(0deg)";
+  // Força o navegador a aplicar o estado inicial antes da animação.
+  void canvas.offsetWidth;
+  canvas.style.transition="transform 4s cubic-bezier(.12,.75,.12,1)";
+  const rotation=360*6+Math.floor(Math.random()*360);
+  requestAnimationFrame(()=>{canvas.style.transform="rotate("+rotation+"deg)";});
+  setTimeout(()=>{
+    data.assignments=assignments;saveData();spinning=false;openGame();
+    alert("Sorteio concluído! Cada participante pode entrar no próprio perfil salvo neste aparelho para revelar seu resultado.");
+  },4100);
+}
+function revealMyResult(){
+  const user=currentUser();
+  if(!user||!data.assignments){alert("O sorteio ainda não foi realizado.");return;}
+  const recipientId=data.assignments[user.id];
+  const recipient=data.users.find(u=>u.id===recipientId);
+  if(!recipient){alert("Não foi possível encontrar o resultado.");return;}
+  const result=document.getElementById("result");
+  result.textContent="🎁 Seu amigo oculto é: "+recipient.character+"!";
+  result.classList.remove("hidden");
+  document.getElementById("revealButton").classList.add("hidden");
+}
+function logout(){
+  // Mantém os participantes e o sorteio; apenas permite trocar o perfil neste aparelho.
+  localStorage.removeItem(SESSION_KEY);currentUserId=null;showHome();
+}
+function initialize(){
+  updateCount();
+  if(currentUser())openGame();else showHome();
+}
+initialize();
+</script>
+</body>
+</html>
